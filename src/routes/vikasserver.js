@@ -40,7 +40,46 @@ router.get('/classes', async (req, res) => {
     }
   });
   
+ // DELETE route to remove a class by ID
+router.delete('/classes/:id', async (req, res) => {
+    const { id } = req.params;
   
+    try {
+      // Find and delete the class by ID
+      const deletedClass = await Class.findByIdAndDelete(id);
+  
+      if (!deletedClass) {
+        return res.status(404).json({ message: 'Class not found' });
+      }
+  
+      res.status(200).json({ message: 'Class deleted successfully' });
+    } catch (error) {
+      res.status(400).json({ message: error.message }); // Respond with an error if deletion fails
+    }
+  });
+  
+  // PUT route to update a class by ID
+  router.put('/classes/:id', async (req, res) => {
+    const { id } = req.params;
+    const { className, classFee, examFee, bookFee } = req.body;
+  
+    try {
+      // Find and update the class by ID
+      const updatedClass = await Class.findByIdAndUpdate(
+        id,
+        { className, classFee, examFee, bookFee },
+        { new: true, runValidators: true }
+      );
+  
+      if (!updatedClass) {
+        return res.status(404).json({ message: 'Class not found' });
+      }
+  
+      res.status(200).json(updatedClass); // Respond with the updated class object
+    } catch (error) {
+      res.status(400).json({ message: error.message }); // Respond with an error if updating fails
+    }
+  });
   
 // POST route to add admission
 router.post('/admissionsform', async (req, res) => {
@@ -205,9 +244,9 @@ router.post('/payment', async (req, res) => {
         const newPayment = new FeePayment({
             admissionNumber,
             name: student.name,
-            fathername: student.fatherName,
+            fatherName: student.fatherName,
             village: student.address,
-            Phonenumber:student.phonenumber,
+            phoneNumber: student.phoneNumber,
             class: student.class,
             section: student.section,
             rollNo: student.rollNo,
@@ -228,7 +267,7 @@ router.post('/payment', async (req, res) => {
             oldFeeDueAmount,
             totalFee,
             discount: student.discount,
-            netFee:  student.netFee,
+            netFee: student.netFee,
             totalPaid,
             totalDueAmount,
             mode,
@@ -244,7 +283,8 @@ router.post('/payment', async (req, res) => {
     }
 });
 
-router.get('/latest-payment-details/:admissionNumber', async (req, res) => {
+
+router.get('/payment-details/:admissionNumber', async (req, res) => {
     const admissionNumber = req.params.admissionNumber;
 
     try {
@@ -254,57 +294,70 @@ router.get('/latest-payment-details/:admissionNumber', async (req, res) => {
             return res.status(404).json({ message: 'Student not found' });
         }
 
-        // Fetch the latest payment record
-        const latestPayment = await FeePayment.findOne({ admissionNumber }).sort({ date: -1 });
+        // Fetch all payment records, sorted by date in descending order
+        const payments = await FeePayment.find({ admissionNumber }).sort({ date: -1 });
 
-        if (!latestPayment) {
-            return res.status(404).json({ message: 'No payment record found for the student' });
-        }
-
-        // Determine which fee was paid
-        let feePaid;
-        if (latestPayment.classFeePaid > 0) {
-            feePaid = 'Class Fee';
-        } else if (latestPayment.busFeePaid > 0) {
-            feePaid = 'Bus Fee';
-        } else if (latestPayment.bookFeePaid > 0) {
-            feePaid = 'Book Fee';
-        } else if (latestPayment.examFeePaid > 0) {
-            feePaid = 'Exam Fee';
-        } else if (latestPayment.oldFeePaid > 0) {
-            feePaid = 'Old Fee';
-        } else {
-            feePaid = 'No fee paid';
+        if (!payments || payments.length === 0) {
+            return res.status(404).json({ message: 'No payment records found for the student' });
         }
 
         // Construct response with payment details and student information
+        const paymentDetails = payments.map(payment => {
+            let feePaid;
+            let amountPaid = 0;
+
+            if (payment.classFeePaid > (payment.classFeePaid - (Number(payment.classFeePaid) || 0))) {
+                feePaid = 'Class Fee';
+                amountPaid = Number(payment.classFeePaid);
+            } else if (payment.busFeePaid > (payment.busFeePaid - (Number(payment.busFeePaid) || 0))) {
+                feePaid = 'Bus Fee';
+                amountPaid = Number(payment.busFeePaid);
+            } else if (payment.bookFeePaid > (payment.bookFeePaid - (Number(payment.bookFeePaid) || 0))) {
+                feePaid = 'Book Fee';
+                amountPaid = Number(payment.bookFeePaid);
+            } else if (payment.examFeePaid > (payment.examFeePaid - (Number(payment.examFeePaid) || 0))) {
+                feePaid = 'Exam Fee';
+                amountPaid = Number(payment.examFeePaid);
+            } else if (payment.oldFeePaid > (payment.oldFeePaid - (Number(payment.oldFeePaid) || 0))) {
+                feePaid = 'Old Fee';
+                amountPaid = Number(payment.oldFeePaid);
+            } else {
+                feePaid = 'No fee paid';
+            }
+
+            return {
+                date: payment.date,
+                feePaid,
+                mode: payment.mode,
+                amountPaid,
+                totalPaid: payment.totalPaid,
+                totalDue: payment.totalDueAmount,
+                receiptNumber: payment.receiptNumber,
+            };
+        });
+
         const response = {
             student: {
                 admissionNumber: student.admissionNumber,
                 fullName: student.fullName,
                 fatherName: student.fatherName,
-                village: student.village,
-                class: student.class,
                 section: student.section,
                 rollNumber: student.rollNumber,
             },
-            latestPayment: {
-                date: latestPayment.date,
-                feePaid,
-                mode:latestPayment.mode,
-                amountPaid: latestPayment.classFeePaid || latestPayment.busFeePaid || latestPayment.bookFeePaid || latestPayment.examFeePaid || latestPayment.oldFeePaid,
-                totalPaid: latestPayment.totalPaid,
-                totalDue: latestPayment.totalDueAmount,
-                receiptNumber:latestPayment.receiptNumber,
-            }
+            payments: paymentDetails,
         };
 
-        res.status(200).json({ message: 'Latest payment details retrieved successfully!', data: response });
+        res.status(200).json({ message: 'Payment details retrieved successfully!', data: response });
     } catch (error) {
-        console.error('Error retrieving latest payment details:', error);
-        res.status(500).json({ error: 'Error retrieving latest payment details. Please try again' });
+        console.error('Error retrieving payment details:', error);
+        res.status(500).json({ error: 'Error retrieving payment details. Please try again' });
     }
 });
+
+
+
+
+
 
 
 
